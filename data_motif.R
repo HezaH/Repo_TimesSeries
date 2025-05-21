@@ -80,10 +80,11 @@ gen_data <- function() {
 }
 
 # Função para gerar o plot da série com os pontos de detecção quando presentes
-plot_detection_points <- function(ts_data, detection, title = "Detection Plot") {
-  # Carrega o pacote ggplot2, se ainda não estiver carregado
+plot_detection_points <- function(ts_data, detection, title = "Detection Plot", 
+                                   width = 10, height = 6, dpi = 300) {
+  # Carrega o pacote ggplot2, se não estiver carregado
   if (!requireNamespace("ggplot2", quietly = TRUE))
-    stop("ggplot2 é necessário para esta função. Instale-o usando install.packages('ggplot2').")
+    stop("ggplot2 é necessário para esta função. Instale-o com install.packages('ggplot2').")
   
   # Cria um data frame com o índice (proxy para tempo) e os valores da série
   df <- data.frame(
@@ -97,7 +98,7 @@ plot_detection_points <- function(ts_data, detection, title = "Detection Plot") 
     ggplot2::labs(title = title, x = "Tempo", y = "Valor") +
     ggplot2::theme_minimal()
   
-  # Se o data frame 'detection' contiver a coluna 'idx' e se houver eventos marcados, sobrepõe os pontos em vermelho.
+  # Se houver detecções, sobrepõe os pontos em vermelho
   if("idx" %in% names(detection) && nrow(detection[detection$event, ]) > 0) {
     idx_events <- detection$idx[detection$event]
     df_det <- data.frame(
@@ -108,6 +109,11 @@ plot_detection_points <- function(ts_data, detection, title = "Detection Plot") 
                                  color = "red", size = 3)
   }
   
+  # Se save_file não for NULL, salva o gráfico
+  save_file = paste0("figures/", title, ".png")
+  ggplot2::ggsave(filename = save_file, plot = p, width = width, height = height, dpi = dpi)
+  message("Gráfico salvo em: ", save_file)
+  
   return(p)
 }
 
@@ -115,13 +121,14 @@ plot_detection_points <- function(ts_data, detection, title = "Detection Plot") 
 cases_motifs <- gen_data()
 
 # Plot e salvamento dos gráficos:
-p100 <- plot_motif(cases_motifs$mitdb100, "MITDB Record 100", save_file = "plot_mitdb100.png")
-p102 <- plot_motif(cases_motifs$mitdb102, "MITDB Record 102", save_file = "plot_mitdb102.png")
+p100 <- plot_motif(cases_motifs$mitdb100, "MITDB Record 100", save_file = "figures/plot_mitdb100.png")
+p102 <- plot_motif(cases_motifs$mitdb102, "MITDB Record 102", save_file = "figures/plot_mitdb102.png")
 print(p100)
 print(p102)
 
 # Exemplo completo: para cada caso em cases_motifs, para cada tratamento e modelo execute:
 for (i in 1:length(cases_motifs)) {
+  nome_serie <- names(cases_motifs)[i]
   # Extraímos os dados do caso atual:
   data <- cases_motifs[[i]]
   # Cria a coluna de tempo como índice
@@ -171,7 +178,7 @@ for (i in 1:length(cases_motifs)) {
   
   # Cria a lista de tratamentos: adiciona também a série original ("orig")
   treatments <- list(
-    orig = ts_numeric,       # Série original sem modificação
+    orig = data$serie,       # Série original sem modificação
     norm = ts_data_norm,     # Tratamento 0: Normalização
     suav = ts_data_ma,       # Tratamento 1: Suavização (média móvel)
     diff = ts_data_diff,     # Tratamento 2: Diferenciação
@@ -180,10 +187,14 @@ for (i in 1:length(cases_motifs)) {
   
   modelos <- list(
     harb     = list(def = function() harbinger(), name = "harb"),
-    hdis_sax = list(def = function() hdis_sax(13, 10), name = "hdis_sax"),
-    hdis_mp  = list(def = function() hdis_mp(mode = "stamp", w = 10, qtd = 5), name = "hdis_mp"),
-    hmo_mp   = list(def = function() hmo_mp(mode = "stamp", w = 10, qtd = 5), name = "hmo_mp"),
-    hmo_sax  = list(def = function() hmo_sax(10, 13), name = "hmo_sax")
+    hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
+    hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = 10), name = "hdis_mp_stamp"),
+    hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = 10), name = "hmo_mp_stamp"),
+    hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = 10), name = "hdis_mp_stomp"),
+    hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = 10), name = "hmo_mp_stomp"),
+    hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = 10), name = "hdis_mp_scrimp"),
+    hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = 10), name = "hmo_mp_scrimp"),
+    hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax")
   )
   
   results <- list()
@@ -194,12 +205,9 @@ for (i in 1:length(cases_motifs)) {
     
     for (mdl in names(modelos)) {
       model_info <- modelos[[mdl]]
-      
-      # Instancia o modelo usando a função definida
-      model_obj <- model_info$def()
-      
+
       # Ajusta o modelo à série tratada
-      model_obj <- fit(model_obj, ts_data)
+      model_obj <- fit(model_info$def(), ts_data)
       
       # Executa a detecção dos eventos na série tratada
       detection <- detect(model_obj, ts_data)
@@ -216,7 +224,7 @@ for (i in 1:length(cases_motifs)) {
       
       # Gera o plot nativo da detecção utilizando a função de plot criada
       p_obj <- plot_detection_points(ts_data, detection,
-                                     title = paste0(mdl, " - ", trt_name))
+                                     title = paste0(nome_serie, mdl, " - ", trt_name))
       print(p_obj)
     }
   }
