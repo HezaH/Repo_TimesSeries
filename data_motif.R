@@ -31,6 +31,40 @@ plot_motif <- function(motif_data, plot_title = "Motif", save_file = NULL) {
   return(p)
 }
 
+plot_motif_html <- function(motif_data, plot_title = "Motif", save_file = NULL) {
+  # Carrega/garante que os pacotes necessários estão carregados
+  library(dplyr)
+  library(ggplot2)
+  library(plotly)
+  library(htmlwidgets)
+  
+  # Adiciona um índice para representar a posição ou o tempo
+  motif_data <- motif_data %>% mutate(Index = row_number())
+  
+  # Cria o gráfico utilizando ggplot2
+  p <- ggplot(motif_data, aes(x = Index, y = serie)) +
+    geom_line(color = "blue") +
+    geom_point(data = filter(motif_data, event), 
+               aes(x = Index, y = serie), 
+               color = "red", size = 3) +
+    labs(title = plot_title, x = "Índice", y = "Valor da Série") +
+    theme_minimal(base_size = 16)
+  
+  # Converte o gráfico para o formato interativo plotly
+  interactive_plot <- ggplotly(p)
+  
+  # Exibe o gráfico interativo na sessão atual
+  print(interactive_plot)
+  
+  # Se save_file não for NULL, salva o gráfico interativo em um arquivo HTML
+  if (!is.null(save_file)) {
+    saveWidget(interactive_plot, file = save_file, selfcontained = TRUE)
+    message("Gráfico salvo em: ", save_file)
+  }
+  
+  return(interactive_plot)
+}
+
 gen_data <- function() {
   require(lubridate)
   require(dplyr)
@@ -122,8 +156,16 @@ cases_motifs <- gen_data()
 
 # Plot e salvamento dos gráficos:
 p100 <- plot_motif(cases_motifs$mitdb100, "MITDB Record 100", save_file = "figures/plot_mitdb100.png")
+p100_html <- plot_motif_html(cases_motifs$mitdb100, "MITDB Record 100", save_file = "figures/plot_mitdb100.html")
+
 p102 <- plot_motif(cases_motifs$mitdb102, "MITDB Record 102", save_file = "figures/plot_mitdb102.png")
+p102_html <- plot_motif_html(cases_motifs$mitdb102, "MITDB Record 102", save_file = "figures/plot_mitdb102.html")
+
+# Exibe os gráficos
 print(p100)
+print(p100_html)
+
+print(p102_html)
 print(p102)
 
 # Exemplo completo: para cada caso em cases_motifs, para cada tratamento e modelo execute:
@@ -144,7 +186,32 @@ for (i in 1:length(cases_motifs)) {
   preproc <- fit(preproc, ts_numeric)
   ts_data_norm <- transform(preproc, ts_numeric)
   
-  # Tratamento 1: Suavização (média móvel)
+  # Tratamento 1: Global Norma #! Erro
+  # ngminmax <- ts_norm_gminmax(remove_outliers = FALSE)
+  # ngminmax <- fit(ngminmax, ts_numeric)
+  # dgminmax <- transform(ngminmax, ts_numeric)
+  
+  ### Tratamento 2: Diff com Scaller
+  ndiff <- ts_norm_diff(remove_outliers = FALSE)
+  ndiff <- fit(ndiff, ts_numeric)
+  ddiff <- transform(ndiff, ts_numeric)
+  
+  ### Tratamento 3: Slidiing Window MinMax
+  nswminmax <- ts_norm_swminmax(remove_outliers = FALSE)
+  nswminmax <- fit(nswminmax, ts_numeric)
+  dswminmax <- transform(nswminmax, ts_numeric)
+  
+  ### Tratamento 4: AdaptineNormalization
+  n_an <- ts_norm_an()
+  n_an <- fit(n_an, ts_numeric)
+  d_an <- transform(n_an, ts_numeric)
+  
+  # Tratamento 5: Zscore
+  preproc <- zscore()
+  preproc <- fit(preproc, ts_numeric)
+  ts_data_zscore <- transform(preproc, ts_numeric)
+  
+  # Tratamento 6: Suavização (média móvel)
   window_size <- 5
   ts_ma <- stats::filter(ts_numeric, rep(1/window_size, window_size), sides = 2)
   ts_ma[is.na(ts_ma)] <- ts_numeric[is.na(ts_ma)]
@@ -152,7 +219,7 @@ for (i in 1:length(cases_motifs)) {
   preproc_ma <- fit(preproc_ma, ts_ma)
   ts_data_ma <- transform(preproc_ma, ts_ma)
   
-  # Tratamento 2: Diferenciação
+  # Tratamento 7: Diferenciação
   ts_diff <- diff(ts_numeric, differences = 1)
   # Para manter o alinhamento, remova o primeiro elemento das outras variáveis (aqui, usamos data$tempo)
   # Supondo que 'data_filter' seja o próprio 'data'
@@ -163,7 +230,7 @@ for (i in 1:length(cases_motifs)) {
   preproc_diff <- fit(preproc_diff, ts_diff)
   ts_data_diff <- transform(preproc_diff, ts_diff)
   
-  # Tratamento 3: Ajuste de Outliers via IQR
+  # Tratamento 8: Ajuste de Outliers via IQR
   Q1 <- quantile(ts_numeric, 0.25, na.rm = TRUE)
   Q3 <- quantile(ts_numeric, 0.75, na.rm = TRUE)
   IQR_val <- Q3 - Q1
@@ -179,22 +246,28 @@ for (i in 1:length(cases_motifs)) {
   # Cria a lista de tratamentos: adiciona também a série original ("orig")
   treatments <- list(
     orig = data$serie,       # Série original sem modificação
-    norm = ts_data_norm,     # Tratamento 0: Normalização
-    suav = ts_data_ma,       # Tratamento 1: Suavização (média móvel)
-    diff = ts_data_diff,     # Tratamento 2: Diferenciação
-    out  = ts_data_out       # Tratamento 3: Ajuste de Outliers via IQR
+    norm = ts_data_norm,     # Normalização
+    # ngminmax = dgminmax,     # Global Norma #! Erro
+    ddiff = ddiff,           # Diff com Scaller
+    swminmax = dswminmax,    # Sliding Window MinMax
+    an = d_an,               # Adaptive Normalization
+    zscore = ts_data_zscore, # Z-score
+    ma = ts_data_ma,         # Suavização (média móvel)
+    diff = ts_data_diff,     # Diferenciação
+    out = ts_data_out        # Ajuste de Outliers via IQR
   )
   
   modelos <- list(
     harb     = list(def = function() harbinger(), name = "harb"),
     hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
-    hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = 10), name = "hdis_mp_stamp"),
-    hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = 10), name = "hmo_mp_stamp"),
-    hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = 10), name = "hdis_mp_stomp"),
-    hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = 10), name = "hmo_mp_stomp"),
-    hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = 10), name = "hdis_mp_scrimp"),
-    hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = 10), name = "hmo_mp_scrimp"),
-    hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax")
+    hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = 1), name = "hdis_mp_stamp"),
+    hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = 3), name = "hmo_mp_stamp"),
+    hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = 1), name = "hdis_mp_stomp"),
+    hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = 3), name = "hmo_mp_stomp"),
+    hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = 1), name = "hdis_mp_scrimp"),
+    hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = 3), name = "hmo_mp_scrimp"),
+    hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax"),
+    hmo_xsax  = list(def = function() hmo_xsax(37,3,3), name = "hmo_xsax")
   )
   
   results <- list()
@@ -221,6 +294,12 @@ for (i in 1:length(cases_motifs)) {
       # Exibe um resumo no console
       cat("Tratamento:", trt_name, " | Modelo:", mdl, "\n")
       print(detection[detection$event, ])
+      print(detection |> dplyr::filter(event==TRUE))
+      if (grepl("hdis_", mdl)){      
+        evaluation <- evaluate(model_obj, detection$event, dataset$event)
+        print(evaluation$confMatrix)
+        }
+
       
       # Gera o plot nativo da detecção utilizando a função de plot criada
       p_obj <- plot_detection_points(ts_data, detection,
