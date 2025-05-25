@@ -6,6 +6,8 @@ library(dplyr)
 library(lubridate)
 library(ggplot2)
 library(patchwork)
+options(scipen=999)
+library(ggpmisc)
 
 # Função de plotagem que exibe e opcionalmente salva o gráfico
 plot_motif <- function(motif_data, plot_title = "Motif", save_file = NULL) {
@@ -115,7 +117,7 @@ gen_data <- function() {
 
 # Função para gerar o plot da série com os pontos de detecção quando presentes
 plot_detection_points <- function(ts_data, detection, title = "Detection Plot", 
-                                   width = 10, height = 6, dpi = 300) {
+                                  width = 10, height = 6, dpi = 300) {
   # Carrega o pacote ggplot2, se não estiver carregado
   if (!requireNamespace("ggplot2", quietly = TRUE))
     stop("ggplot2 é necessário para esta função. Instale-o com install.packages('ggplot2').")
@@ -187,9 +189,9 @@ for (i in 1:length(cases_motifs)) {
   ts_data_norm <- transform(preproc, ts_numeric)
   
   # Tratamento 1: Global Norma #! Erro
-  # ngminmax <- ts_norm_gminmax(remove_outliers = FALSE)
-  # ngminmax <- fit(ngminmax, ts_numeric)
-  # dgminmax <- transform(ngminmax, ts_numeric)
+  ngminmax <- ts_norm_gminmax(remove_outliers = FALSE)
+  ngminmax <- fit(ngminmax, ts_numeric)
+  dgminmax <- transform(ngminmax, ts_numeric)
   
   ### Tratamento 2: Diff com Scaller
   ndiff <- ts_norm_diff(remove_outliers = FALSE)
@@ -247,7 +249,7 @@ for (i in 1:length(cases_motifs)) {
   treatments <- list(
     orig = data$serie,       # Série original sem modificação
     norm = ts_data_norm,     # Normalização
-    # ngminmax = dgminmax,     # Global Norma #! Erro
+    ngminmax = dgminmax,     # Global Norma #! Erro
     ddiff = ddiff,           # Diff com Scaller
     swminmax = dswminmax,    # Sliding Window MinMax
     an = d_an,               # Adaptive Normalization
@@ -278,7 +280,7 @@ for (i in 1:length(cases_motifs)) {
     
     for (mdl in names(modelos)) {
       model_info <- modelos[[mdl]]
-
+      
       # Ajusta o modelo à série tratada
       model_obj <- fit(model_info$def(), ts_data)
       
@@ -298,8 +300,8 @@ for (i in 1:length(cases_motifs)) {
       if (grepl("hdis_", mdl)){      
         evaluation <- evaluate(model_obj, detection$event, dataset$event)
         print(evaluation$confMatrix)
-        }
-
+      }
+      
       
       # Gera o plot nativo da detecção utilizando a função de plot criada
       p_obj <- plot_detection_points(ts_data, detection,

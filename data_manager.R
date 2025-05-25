@@ -7,6 +7,7 @@ library(lubridate)
 library(ggplot2)
 library(patchwork)
 library(tidyr)
+library(dplyr)
 
 plot_motif_html <- function(motif_data, plot_title = "Motif", save_file = NULL) {
   # Carrega/garante que os pacotes necessários estão carregados
@@ -131,20 +132,37 @@ for (i in 1:length(cases_motifs)) {
   # Cria uma nova coluna que mantém os valores se pertencem ao grupo mais alto, ou NA caso contrário
   data$serie_high <- ifelse(data$group == highest_group, data$serie, NA)
   
-  # Inicializa a nova coluna diff_index e a variável auxiliar last_time
-  data$diff_index <- NA       # criamos a coluna com NA para todas as linhas
-  last_time <- 0              # valor inicial da última ocorrência
+  # Inicializa a variável auxiliar e a coluna diff_index
+  last_time <- 0
+  data$diff_index <- NA  # Cria/limpa a coluna diff_index
   
-  # Loop para calcular a diferença de índices somente para linhas com valor em serie_high
-  for (j in 1:nrow(data)) {
+  # Vamos percorrer o dataframe usando um loop while
+  j <- 1
+  n <- nrow(data)
+  while(j <= n) {
     if (!is.na(data$serie_high[j])) {
-      # Calcula a diferença do índice atual com o último índice registrado
-      data$diff_index[j] <- data$tempo[j] - last_time
-      # Atualiza o last_time para este índice
-      last_time <- data$tempo[j]
+      # Se o valor não for NA, é o começo de um bloco de valores consecutivos
+      block_start <- j
+      # Avança enquanto os valores em serie_high forem não NA
+      while(j <= n && !is.na(data$serie_high[j])) {
+        j <- j + 1
+      }
+      block_end <- j - 1  # Último índice do bloco
+      # Vetor com os índices do bloco
+      block_indices <- block_start:block_end
+      # Extrai os valores desse bloco
+      block_values <- data$serie_high[block_indices]
+      # Identifica, dentro do bloco, o índice relativo onde o valor absoluto é o maior
+      max_val_index <- which.max(abs(block_values))
+      # Converte para o índice global do dataframe
+      global_row <- block_indices[max_val_index]
+      # Calcula a diferença: índice atual menos o último índice registrado
+      data$diff_index[global_row] <- data$tempo[global_row] - last_time
+      # Atualiza last_time para o índice atual
+      last_time <- data$tempo[global_row]
     } else {
-      # Se não houver valor, podemos manter NA (ou definir outro valor, se preferir)
-      data$diff_index[j] <- NA
+      # Se for NA, avança para a próxima linha
+      j <- j + 1
     }
   }
   
@@ -156,5 +174,11 @@ for (i in 1:length(cases_motifs)) {
                                save_file = paste0("figures/max_values_", nome_serie, ".html"))
   
   print(plot_html)
-
+  print(data %>% filter(!is.na(diff_index)))
+  
+  media_diff <- data %>% 
+    filter(!is.na(diff_index)) %>% 
+    summarise(mean_diff = mean(diff_index, na.rm = TRUE))
+  
+  print(media_diff)
 }
