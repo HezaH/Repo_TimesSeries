@@ -1,7 +1,12 @@
 source("header.R")
-library(daltoolbox)
-library(harbinger)
+# install.packages("devtools")
+library(devtools)
+
+library(daltoolbox) 
+
+library(harbinger) 
 library(dalevents)
+library(tspredit)
 library(dplyr)
 library(lubridate)
 library(ggplot2)
@@ -66,6 +71,56 @@ plot_motif_html <- function(motif_data, plot_title = "Motif", save_file = NULL) 
   
   return(interactive_plot)
 }
+
+plot_detection_points_html <- function(ts_data, detection, 
+                                       title = "Detection Plot", 
+                                       width = 10, height = 6, dpi = 300, 
+                                       save_file = NULL) {
+  # Carrega/garante os pacotes necessários
+  if (!requireNamespace("ggplot2", quietly = TRUE))
+    stop("ggplot2 é necessário para essa função. Instale-o com install.packages('ggplot2').")
+  if (!requireNamespace("plotly", quietly = TRUE))
+    stop("plotly é necessário para essa função. Instale-o com install.packages('plotly').")
+  if (!requireNamespace("htmlwidgets", quietly = TRUE))
+    stop("htmlwidgets é necessário para essa função. Instale-o com install.packages('htmlwidgets').")
+  
+  # Cria um data frame com o índice (proxy para tempo) e os valores da série
+  df <- data.frame(
+    tempo = seq_along(ts_data),
+    valor = ts_data
+  )
+  
+  # Cria o gráfico base, representando o modelo (dados reais) com uma linha vermelha
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = tempo, y = valor)) +
+    ggplot2::geom_line(color = "blue") +
+    ggplot2::labs(title = title, x = "Tempo", y = "Valor") +
+    ggplot2::theme_minimal()
+  
+  # Se houver detecções, sobrepõe os pontos (previsões) em roxo
+  # Pressupomos que 'detection' seja um data frame contendo a coluna 'idx' e a coluna lógica 'event'
+  if("idx" %in% names(detection) && any(detection$event, na.rm = TRUE)) {
+    idx_pred <- detection$idx[detection$event]
+    df_pred <- data.frame(
+      tempo = df$tempo[idx_pred],
+      valor = ts_data[idx_pred]
+    )
+    p <- p + ggplot2::geom_point(data = df_pred, ggplot2::aes(x = tempo, y = valor),
+                                 color = "purple", size = 3)
+  }
+  
+  # Converte o gráfico para o formato interativo plotly
+  interactive_plot <- plotly::ggplotly(p)
+  print(interactive_plot)
+  
+  # Se for informado um arquivo para salvar, grava o gráfico interativo em HTML
+  if (!is.null(save_file)) {
+    htmlwidgets::saveWidget(interactive_plot, file = save_file, selfcontained = TRUE)
+    message("Gráfico salvo em HTML: ", save_file)
+  }
+  
+  return(interactive_plot)
+}
+
 
 gen_data <- function() {
   require(lubridate)
@@ -156,57 +211,59 @@ plot_detection_points <- function(ts_data, detection, title = "Detection Plot",
 # Carrega os dados de exemplo
 cases_motifs <- gen_data()
 
-# Plot e salvamento dos gráficos:
-p100 <- plot_motif(cases_motifs$mitdb100, "MITDB Record 100", save_file = "figures/plot_mitdb100.png")
-p100_html <- plot_motif_html(cases_motifs$mitdb100, "MITDB Record 100", save_file = "figures/plot_mitdb100.html")
-
-p102 <- plot_motif(cases_motifs$mitdb102, "MITDB Record 102", save_file = "figures/plot_mitdb102.png")
-p102_html <- plot_motif_html(cases_motifs$mitdb102, "MITDB Record 102", save_file = "figures/plot_mitdb102.html")
-
-# Exibe os gráficos
-print(p100)
-print(p100_html)
-
-print(p102_html)
-print(p102)
-
 # Exemplo completo: para cada caso em cases_motifs, para cada tratamento e modelo execute:
 for (i in 1:length(cases_motifs)) {
   nome_serie <- names(cases_motifs)[i]
+  
   # Extraímos os dados do caso atual:
   data <- cases_motifs[[i]]
+  num_true <- sum(data$event, na.rm = TRUE)
+  if (num_true < 3){
+    num_true = 3
+  }
+  
+  # Plot e salvamento dos gráficos:
+  p1 <- plot_motif(data, paste0("MITDB Record ", nome_serie), 
+                   save_file = paste0("figures/", nome_serie, ".png"))
+  p1_html <- plot_motif_html(data, paste0("MITDB Record ", nome_serie), 
+                             save_file = paste0("figures/", nome_serie, ".html"))
+  
+  # Exibe os gráficos
+  print(p1)
+  print(p1_html)
+  
   # Cria a coluna de tempo como índice
   data$tempo <- 1:nrow(data)
-  # Define a coluna de eventos (aqui apenas FALSE para demonstrar; ajuste conforme necessário)
-  data$event <- FALSE
   
   # Dados originais: vetor numérico da série
   ts_numeric <- data$serie
+  data_size <- length(ts_numeric)
+  ts_numeric_complete <- ts_data(data$serie, data_size)
   
   # Tratamento 0: Normalização
   preproc <- minmax()   # ou ts_norm_gminmax()
   preproc <- fit(preproc, ts_numeric)
   ts_data_norm <- transform(preproc, ts_numeric)
   
-  # Tratamento 1: Global Norma #! Erro
-  ngminmax <- ts_norm_gminmax(remove_outliers = FALSE)
+  # Tratamento 1: Global Norma 
+  ngminmax <- ts_norm_gminmax()
   ngminmax <- fit(ngminmax, ts_numeric)
   dgminmax <- transform(ngminmax, ts_numeric)
   
   ### Tratamento 2: Diff com Scaller
-  ndiff <- ts_norm_diff(remove_outliers = FALSE)
-  ndiff <- fit(ndiff, ts_numeric)
-  ddiff <- transform(ndiff, ts_numeric)
+  ndiff <- ts_norm_diff()
+  ndiff <- fit(ndiff, ts_numeric_complete)
+  ddiff <- transform(ndiff, ts_numeric_complete)
   
   ### Tratamento 3: Slidiing Window MinMax
-  nswminmax <- ts_norm_swminmax(remove_outliers = FALSE)
-  nswminmax <- fit(nswminmax, ts_numeric)
-  dswminmax <- transform(nswminmax, ts_numeric)
+  nswminmax <- ts_norm_swminmax()
+  nswminmax <- fit(nswminmax, ts_numeric_complete)
+  dswminmax <- transform(nswminmax, ts_numeric_complete)
   
   ### Tratamento 4: AdaptineNormalization
   n_an <- ts_norm_an()
-  n_an <- fit(n_an, ts_numeric)
-  d_an <- transform(n_an, ts_numeric)
+  n_an <- fit(n_an, ts_numeric_complete)
+  d_an <- transform(n_an, ts_numeric_complete)
   
   # Tratamento 5: Zscore
   preproc <- zscore()
@@ -249,7 +306,7 @@ for (i in 1:length(cases_motifs)) {
   treatments <- list(
     orig = data$serie,       # Série original sem modificação
     norm = ts_data_norm,     # Normalização
-    ngminmax = dgminmax,     # Global Norma #! Erro
+    ngminmax = dgminmax,     # Global Norma 
     ddiff = ddiff,           # Diff com Scaller
     swminmax = dswminmax,    # Sliding Window MinMax
     an = d_an,               # Adaptive Normalization
@@ -259,19 +316,28 @@ for (i in 1:length(cases_motifs)) {
     out = ts_data_out        # Ajuste de Outliers via IQR
   )
   
-  modelos <- list(
-    harb     = list(def = function() harbinger(), name = "harb"),
-    hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
-    hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = 1), name = "hdis_mp_stamp"),
-    hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = 3), name = "hmo_mp_stamp"),
-    hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = 1), name = "hdis_mp_stomp"),
-    hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = 3), name = "hmo_mp_stomp"),
-    hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = 1), name = "hdis_mp_scrimp"),
-    hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = 3), name = "hmo_mp_scrimp"),
-    hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax"),
-    hmo_xsax  = list(def = function() hmo_xsax(37,3,3), name = "hmo_xsax")
-  )
-  
+  if (nome_serie == "mitdb100") { #discord 100
+    modelos <- list(
+      harb     = list(def = function() harbinger(), name = "harb"),
+      hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
+      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = num_true), name = "hdis_mp_stamp"),
+      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = num_true), name = "hdis_mp_stomp"),
+      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hdis_mp_scrimp")
+    )
+  } else if (nome_serie == "mitdb102") { #motif 102
+    modelos <- list(
+      harb     = list(def = function() harbinger(), name = "harb"),
+      hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
+      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = num_true), name = "hdis_mp_stamp"),
+      hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = num_true), name = "hmo_mp_stamp"),
+      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = num_true), name = "hdis_mp_stomp"),
+      hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = num_true), name = "hmo_mp_stomp"),
+      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hdis_mp_scrimp"),
+      hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hmo_mp_scrimp"),
+      hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax"),
+      hmo_xsax  = list(def = function() hmo_xsax(37,3,num_true), name = "hmo_xsax")
+    )
+  }
   results <- list()
   
   for (trt_name in names(treatments)) {
@@ -279,6 +345,10 @@ for (i in 1:length(cases_motifs)) {
     results[[trt_name]] <- list()
     
     for (mdl in names(modelos)) {
+      print(paste0("Processing treatment: ", trt_name, " with model: ", mdl, "data: ", ts_data))
+      if (mdl == "harb"){
+        mdl <- mdl
+      }
       model_info <- modelos[[mdl]]
       
       # Ajusta o modelo à série tratada
@@ -294,19 +364,20 @@ for (i in 1:length(cases_motifs)) {
       )
       
       # Exibe um resumo no console
-      cat("Tratamento:", trt_name, " | Modelo:", mdl, "\n")
+      print(paste0("Processing treatment: ", trt_name, " with model: ", mdl, "data: ", ts_data))
       print(detection[detection$event, ])
       print(detection |> dplyr::filter(event==TRUE))
+      
       if (grepl("hdis_", mdl)){      
-        evaluation <- evaluate(model_obj, detection$event, dataset$event)
+        evaluation <- evaluate(model_obj, detection$event, data$event)
         print(evaluation$confMatrix)
       }
       
-      
-      # Gera o plot nativo da detecção utilizando a função de plot criada
-      p_obj <- plot_detection_points(ts_data, detection,
-                                     title = paste0(nome_serie, mdl, " - ", trt_name))
+      p_obj <- plot_detection_points_html(ts_data, detection,
+                                          title = paste0(nome_serie, mdl, " - ", trt_name),
+                                          save_file = paste0("figures/", nome_serie, "_", mdl, "_", trt_name, ".html"))
       print(p_obj)
+
     }
   }
 }
