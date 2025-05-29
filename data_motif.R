@@ -39,13 +39,14 @@ plot_motif <- function(motif_data, plot_title = "Motif", save_file = NULL) {
 }
 
 plot_motif_html <- function(motif_data, plot_title = "Motif", save_file = NULL) {
+  
   # Adiciona um índice para representar a posição ou o tempo
   motif_data <- motif_data %>% mutate(Index = row_number())
   
   # Cria o gráfico utilizando ggplot2
   p <- ggplot(motif_data, aes(x = Index, y = serie)) +
     geom_line(color = "blue") +
-    geom_point(data = filter(motif_data, event), 
+    geom_point(data = filter(motif_data, !is.na(diff_index)), 
                aes(x = Index, y = serie), 
                color = "red", size = 3) +
     labs(title = plot_title, x = "Índice", y = "Valor da Série") +
@@ -209,9 +210,73 @@ for (i in 1:length(cases_motifs)) {
   # Extraímos os dados do caso atual:
   data <- cases_motifs[[i]]
   event_info <- data$event
+  
+  # Cria a coluna "tempo" com o índice original
+  data$tempo <- 1:nrow(data)
+  
   num_true <- sum(data$event, na.rm = TRUE)
   if (num_true < 3){
     num_true = 3
+  }
+  
+  # Definindo o intervalo dos valores da série conforme informado (-2.7 a 1.3)
+  min_val <- min(data$serie, na.rm = TRUE)
+  max_val <- max(data$serie, na.rm = TRUE)
+  
+  
+  # Cria os pontos de quebra (breaks)
+  # Para 5 grupos, precisamos de 6 pontos, por isso usamos length.out = 6
+  breaks <- seq(min_val, max_val, length.out = 7)
+  
+  # A função cut categoriza os valores da coluna "serie" conforme esses intervalos
+  data$group <- cut(data$serie, breaks = breaks, include.lowest = TRUE, right = TRUE)
+  
+  # Conta a frequência de ocorrências em cada grupo
+  freq_groups <- table(data$group)
+  
+  # Exibe o nome da série e os resultados 
+  cat("Frequência dos grupos para", nome_serie, ":\n") 
+  print(freq_groups) 
+  cat("\n")
+  
+  # Identifica o grupo com valores mais altos (o último nível)  
+  highest_group <- tail(levels(data$group), n = 1)
+  
+  # Cria uma nova coluna que mantém os valores se pertencem ao grupo mais alto, ou NA caso contrário
+  data$serie_high <- ifelse(data$group == highest_group, data$serie, NA)
+  
+  # Inicializa a variável auxiliar e a coluna diff_index
+  last_time <- 0
+  data$diff_index <- NA  # Cria/limpa a coluna diff_index
+  
+  # Vamos percorrer o dataframe usando um loop while
+  j <- 1
+  n <- nrow(data)
+  while(j <= n) {
+    if (!is.na(data$serie_high[j])) {
+      # Se o valor não for NA, é o começo de um bloco de valores consecutivos
+      block_start <- j
+      # Avança enquanto os valores em serie_high forem não NA
+      while(j <= n && !is.na(data$serie_high[j])) {
+        j <- j + 1
+      }
+      block_end <- j - 1  # Último índice do bloco
+      # Vetor com os índices do bloco
+      block_indices <- block_start:block_end
+      # Extrai os valores desse bloco
+      block_values <- data$serie_high[block_indices]
+      # Identifica, dentro do bloco, o índice relativo onde o valor absoluto é o maior
+      max_val_index <- which.max(abs(block_values))
+      # Converte para o índice global do dataframe
+      global_row <- block_indices[max_val_index]
+      # Calcula a diferença: índice atual menos o último índice registrado
+      data$diff_index[global_row] <- data$tempo[global_row] - last_time
+      # Atualiza last_time para o índice atual
+      last_time <- data$tempo[global_row]
+    } else {
+      # Se for NA, avança para a próxima linha
+      j <- j + 1
+    }
   }
   
   # Plot e salvamento dos gráficos:
@@ -220,12 +285,23 @@ for (i in 1:length(cases_motifs)) {
   p1_html <- plot_motif_html(data, paste0("MITDB Record ", nome_serie), 
                              save_file = paste0("figures/", nome_serie, ".html"))
   
+  # Se desejar, defina o argumento 'save_file' com o nome (e caminho) do arquivo HTML a ser salvo.
+  plot_html <- plot_motif_html(data,
+                               plot_title = paste("Grupo com valores mais altos para", nome_serie),
+                               save_file = paste0("figures/max_values_", nome_serie, ".html"))
+  
   # Exibe os gráficos
   print(p1)
   print(p1_html)
+  print(plot_html)
+  print(data %>% filter(!is.na(diff_index)))
   
-  # Cria a coluna de tempo como índice
-  data$tempo <- 1:nrow(data)
+  media_diff <- data %>% 
+    filter(!is.na(diff_index)) %>% 
+    summarise(mean_diff = mean(diff_index, na.rm = TRUE))
+  
+  media_diff <- as.integer(media_diff[[1]])
+  print(media_diff)
   
   # Dados originais: vetor numérico da série
   ts_numeric <- data$serie
@@ -311,22 +387,22 @@ for (i in 1:length(cases_motifs)) {
   if (nome_serie == "mitdb100") { #discord 100
     modelos <- list(
       harb     = list(def = function() harbinger(), name = "harb"),
-      hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
-      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = num_true), name = "hdis_mp_stamp"),
-      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = num_true), name = "hdis_mp_stomp"),
-      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hdis_mp_scrimp")
+      hdis_sax = list(def = function() hdis_sax(26, media_diff), name = "hdis_sax"),
+      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = media_diff, qtd = num_true), name = "hdis_mp_stamp"),
+      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = media_diff, qtd = num_true), name = "hdis_mp_stomp"),
+      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = media_diff, qtd = num_true), name = "hdis_mp_scrimp")
     )
   } else if (nome_serie == "mitdb102") { #motif 102
     modelos <- list(
       harb     = list(def = function() harbinger(), name = "harb"),
-      hdis_sax = list(def = function() hdis_sax(26, 25), name = "hdis_sax"),
-      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = 25, qtd = num_true), name = "hdis_mp_stamp"),
-      hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = 25, qtd = num_true), name = "hmo_mp_stamp"),
-      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = 25, qtd = num_true), name = "hdis_mp_stomp"),
-      hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = 25, qtd = num_true), name = "hmo_mp_stomp"),
-      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hdis_mp_scrimp"),
-      hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = 25, qtd = num_true), name = "hmo_mp_scrimp"),
-      hmo_sax  = list(def = function() hmo_sax(26, 25), name = "hmo_sax"),
+      hdis_sax = list(def = function() hdis_sax(26, media_diff), name = "hdis_sax"),
+      hdis_mp_stamp  = list(def = function() hdis_mp(mode = "stamp", w = media_diff, qtd = num_true), name = "hdis_mp_stamp"),
+      hmo_mp_stamp   = list(def = function() hmo_mp(mode = "stamp", w = media_diff, qtd = num_true), name = "hmo_mp_stamp"),
+      hdis_mp_stomp  = list(def = function() hdis_mp(mode = "stomp", w = media_diff, qtd = num_true), name = "hdis_mp_stomp"),
+      hmo_mp_stomp   = list(def = function() hmo_mp(mode = "stomp", w = media_diff, qtd = num_true), name = "hmo_mp_stomp"),
+      hdis_mp_scrimp  = list(def = function() hdis_mp(mode = "scrimp", w = media_diff, qtd = num_true), name = "hdis_mp_scrimp"),
+      hmo_mp_scrimp   = list(def = function() hmo_mp(mode = "scrimp", w = media_diff, qtd = num_true), name = "hmo_mp_scrimp"),
+      hmo_sax  = list(def = function() hmo_sax(26, media_diff), name = "hmo_sax"),
       hmo_xsax  = list(def = function() hmo_xsax(37,3,num_true), name = "hmo_xsax")
     )
   }
